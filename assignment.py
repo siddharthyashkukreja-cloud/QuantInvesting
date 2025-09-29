@@ -62,6 +62,14 @@ plt.show()
 ### Helper functions for simplified indexing
 
 def get_training_data(Y_full, X_full, end_period):
+    """
+    Get training data up to end_period.
+    vY_full: Full series of Y
+    vX_full: Full series of X
+    iEnd_period: Index up to which to get training data (exclusive)
+
+    returns: vY_train, vX_train
+    """
     Y_train = Y_full[1:end_period]      # r[t+1] from period 2 to end_period
     X_train = X_full[:end_period-1]     # x[t] from period 1 to end_period-1
     return Y_train, X_train
