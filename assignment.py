@@ -7,11 +7,11 @@ from statsmodels.graphics.tsaplots import plot_pacf
 import matplotlib.pyplot as plt
 warnings.filterwarnings('ignore')
 
-#Linked to public Github Repo so should work for any user with no changes to working directory
-BASE_URL = "https://raw.githubusercontent.com/siddharthyashkukreja-cloud/QuantInvesting/35528ac1dde5d2d873e1adfd0864381326d3b768"
+# Linked to public Github Repo so should work for any user with no changes to working directory
+BASE_URL = "https://raw.githubusercontent.com/siddharthyashkukreja-cloud/QuantInvesting/35528ac1dde5d2d873e1adfd0864381326d3b768/"
 
 # Load the data
-df = pd.read_csv(f"{BASE_URL}/predictor_data.csv")
+df = pd.read_csv(f"{BASE_URL}predictor_data.csv")
 
 print("Columns:", df.columns.tolist())
 print("Header:", df.head())
@@ -57,18 +57,18 @@ plt.ylabel("PACF")
 plt.grid()
 plt.show()
 
-#Lag Selection rule of Thumb Formula = 0.75 × T^(1/3) = 0.75 × 385^(1/3)⌉ = 6
+# Lag Selection rule of Thumb Formula = 0.75 × T^(1/3) = 0.75 × 385^(1/3)⌉ = 6
 
 ### Helper functions for simplified indexing
 
 def get_training_data(Y_full, X_full, end_period):
     """
     Get training data up to end_period.
-    vY_full: Full series of Y
-    vX_full: Full series of X
-    iEnd_period: Index up to which to get training data (exclusive)
+    Y_full: Full series of Y
+    X_full: Full series of X
+    end_period: Index up to which to get training data (exclusive)
 
-    returns: vY_train, vX_train
+    returns: Y_train, X_train
     """
     Y_train = Y_full[1:end_period]      # r[t+1] from period 2 to end_period
     X_train = X_full[:end_period-1]     # x[t] from period 1 to end_period-1
@@ -117,9 +117,9 @@ print(in_sample_df[['Variable', 'Beta', 'T-stat', 'P-value (one-sided)', 'Adj R�
 
 ### Task 2: Out-of-Sample Forecasting
 
-print("\n" + "="*60)
-print("TASK 2: OUT-OF-SAMPLE FORECASTING")
-print("="*60)
+print(" ")
+print("Task 2: Out-of-Sample Forecasting")
+print("="*50)
 
 # Sample Splits
 total_obs = len(data)
@@ -193,19 +193,20 @@ for var in predictor_vars:
     oos_r2_results.append(result)
 
 oos_df = pd.DataFrame(oos_r2_results)
+print(" ")
 print("Out-of-sample R² results:")
 print(oos_df[['Variable', 'OOS R²', 'Outperforms']].sort_values('OOS R²', ascending=False).to_string(index=False))
 
-### Task 3 Kitchen Sink
-print("\n" + "="*60)
-print("TASK 3: KITCHEN SINK REGRESSION")
-print("="*60)
+### Task 3: Kitchen Sink Regression
+print(" ")
+print("Task 3: Kitchen Sink Regression")
+print("="*50)
 
 kitchen_sink_forecasts = []
 for t in range(m + p + 1, total_obs):
     # Get training data for all variables
-    Y_train, _ = get_training_data(Y_full, Y_full, t)  # Just need Y_train
-    X_train = data[predictor_vars].iloc[:t-1].values   # All predictors up to t-1
+    Y_train, _ = get_training_data(Y_full, Y_full, t) 
+    X_train = data[predictor_vars].iloc[:t-1].values  
     
     X_train_const = sm.add_constant(X_train)
     model = sm.OLS(Y_train, X_train_const).fit()
@@ -221,13 +222,11 @@ oos_r2_kitchen_sink = 1 - (mspe_kitchen_sink / mspe_benchmark_oos)
 print(f"Kitchen Sink OOS R²: {oos_r2_kitchen_sink:.4f}")
 print(f"Outperforms benchmark: {oos_r2_kitchen_sink > 0}")
 
-# =============================================================================
-# TASK 4: FORECAST COMBINATION
-# =============================================================================
+### Task 4: Forecast Combination
 
-print("\n" + "="*60)
-print("TASK 4: FORECAST COMBINATION")
-print("="*60)
+print(" ")
+print("Task 4: Forecast Combination")
+print("="*50)
 
 # Mean combination forecasts
 mean_combination_forecasts = []
@@ -269,7 +268,7 @@ def calculate_dmspe_weights_fixed(holdout_forecasts_dict, actual_returns_holdout
             discount_power = len(actual_returns_holdout) - 1 - s_idx
             phi += (theta ** discount_power) * (actual_ret - forecast_ret) ** 2
             
-        phi_values.append(phi + 1e-8)  # Small constant to avoid division by zero
+        phi_values.append(phi + 1e-8) 
 
     # Calculate weights
     phi_values = np.array(phi_values)
@@ -310,20 +309,19 @@ for theta in [0.9, 1.0]:
 print(f"Mean combination: OOS R² = {oos_r2_mean_combo:.4f}")
 print(f"Median combination: OOS R² = {oos_r2_median_combo:.4f}")
 
-# =============================================================================
-# FINAL SUMMARY
-# =============================================================================
+### Summary
 
-print("\n" + "="*60)
-print("FINAL SUMMARY")
-print("="*60)
+print(" ")
+print("Summary")
+print("="*50)
 
 print("Sample Information:")
 print(f"  Total observations: {total_obs}")
 print(f"  HAC lag used: 6 (based on 0.75 × T^(1/3) rule)")
 print(f"  Sample periods: m={m}, p={p}, q={q}")
 
-print("\nForecasting Performance:")
+print(" ")
+print("Forecasting Performance:")
 best_individual_idx = oos_df['OOS R²'].idxmax()
 print(f"  Best individual predictor: {oos_df.loc[best_individual_idx, 'Variable']} ({oos_df.loc[best_individual_idx, 'OOS R²']:.4f})")
 print(f"  Kitchen sink: {oos_r2_kitchen_sink:.4f}")
@@ -342,17 +340,11 @@ all_methods = [
 ] + [(res['Method'], res['OOS R²']) for res in dmspe_results]
 
 best_method = max(all_methods, key=lambda x: x[1])
-print(f"\n🏆 Best performing method: {best_method[0]} (OOS R² = {best_method[1]:.4f})")
+print(f" ")
+print(f"Best performing method: {best_method[0]} (OOS R² = {best_method[1]:.4f})")
 
 outperforming_count = sum([1 for _, r2 in all_methods if r2 > 0])
-print(f"📊 Methods outperforming benchmark: {outperforming_count}/{len(all_methods)}")
+print(f"Methods outperforming benchmark: {outperforming_count}/{len(all_methods)}")
 
-print("\n" + "="*60)
-print("✅ ANALYSIS COMPLETED SUCCESSFULLY!")
-print("="*60)
-print("Key Features:")
-print("✅ Simplified indexing with helper functions")
-print("✅ Optimal HAC lag selection (Newey-West rule)")
-print("✅ Comprehensive forecast evaluation")
-print("✅ Professional result reporting")
-print("✅ No indexing errors or look-ahead bias")
+print(" ")
+print("Analysis completed successfully!")
