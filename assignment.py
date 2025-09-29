@@ -4,6 +4,7 @@ import numpy as np
 import statsmodels.api as sm
 from scipy import stats
 import warnings
+from statsmodels.graphics.tsaplots import plot_pacf
 warnings.filterwarnings('ignore')
 
 # Fixed URL - use raw GitHub URL instead of blob URL
@@ -41,6 +42,7 @@ predictor_mapping = {
 # Create working dataset
 data = df.copy()
 
+
 # Apply negative transformation for specified variables (as per assignment)
 variables_to_negate = ['ntis', 'tbl', 'lty', 'lagINFL']
 for var in variables_to_negate:
@@ -53,7 +55,25 @@ dependent_var = 'r'
 
 # =============================================================================
 # PART 1: IN-SAMPLE ESTIMATION
-# =============================================================================
+# =========================================================================================================================================================
+
+import matplotlib.pyplot as plt
+
+# Partial Autocorrelation Function (PACF) for the dependent variable
+print("\n" + "="*60)
+print("PART 0: PACF TEST TO DECIDE LAG")
+print("="*60)
+
+lags = 20  # Number of lags to consider
+plt.figure(figsize=(10, 6))
+plot_pacf(data['r'], lags=lags, method='ywm', alpha=0.05)
+plt.title("Partial Autocorrelation Function (PACF) for 'r'")
+plt.xlabel("Lags")
+plt.ylabel("PACF")
+plt.grid()
+plt.show()
+
+print("PACF plot displayed. Use this to decide the appropriate lag.")
 
 print("\n" + "="*60)
 print("PART 1: IN-SAMPLE ESTIMATION")
