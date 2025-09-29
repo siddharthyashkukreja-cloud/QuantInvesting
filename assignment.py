@@ -1,14 +1,15 @@
-
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
 from scipy import stats
 import warnings
 from statsmodels.graphics.tsaplots import plot_pacf
+import matplotlib.pyplot as plt
 warnings.filterwarnings('ignore')
 
 # Fixed URL - use raw GitHub URL instead of blob URL
-BASE_URL = "https://raw.githubusercontent.com/siddharthyashkukreja-cloud/QuantInvesting/35528ac1dde5d2d873e1adfd0864381326d3b768"
+# Note: Ensure there are no trailing spaces in the URL
+BASE_URL = "https://raw.githubusercontent.com/siddharthyashkukreja-cloud/QuantInvesting/35528ac1dde5d2d873e1adfd0864381326d3b768/"
 
 # Load the data
 df = pd.read_csv(f"{BASE_URL}/predictor_data.csv")
@@ -42,8 +43,8 @@ predictor_mapping = {
 # Create working dataset
 data = df.copy()
 
-
 # Apply negative transformation for specified variables (as per assignment)
+# Note: Assignment mentions NTIOS, but likely means NTIS based on list and common usage
 variables_to_negate = ['ntis', 'tbl', 'lty', 'lagINFL']
 for var in variables_to_negate:
     data[var] = -data[var]
@@ -54,12 +55,9 @@ predictor_vars = list(predictor_mapping.keys())
 dependent_var = 'r'
 
 # =============================================================================
-# PART 1: IN-SAMPLE ESTIMATION
-# =========================================================================================================================================================
+# PART 0: PACF TEST TO DECIDE LAG (Optional Visualization)
+# =============================================================================
 
-import matplotlib.pyplot as plt
-
-# Partial Autocorrelation Function (PACF) for the dependent variable
 print("\n" + "="*60)
 print("PART 0: PACF TEST TO DECIDE LAG")
 print("="*60)
@@ -72,25 +70,38 @@ plt.xlabel("Lags")
 plt.ylabel("PACF")
 plt.grid()
 plt.show()
+print("PACF plot displayed. Use this to decide the appropriate lag if needed for other analyses.")
 
-print("PACF plot displayed. Use this to decide the appropriate lag.")
+# =============================================================================
+# PART 1: IN-SAMPLE ESTIMATION (CORRECTED: rt+1 on xi,t)
+# =============================================================================
 
 print("\n" + "="*60)
-print("PART 1: IN-SAMPLE ESTIMATION")
+print("PART 1: IN-SAMPLE ESTIMATION (CORRECTED: rt+1 on xi,t)")
 print("="*60)
 
-Y = data['r'].values
+Y_full = data['r'].values # Store full series for later use
 results_dict = {}
 in_sample_results = []
 
 for var in predictor_vars:
-    X = data[var].values
-    X = sm.add_constant(X)
+    X_full = data[var].values # Store full predictor series
+
+    # --- CORRECT ALIGNMENT FOR REGRESSION ---
+    # To regress r_{t+1} on xi,t, align Y[t+1] with X[t].
+    # This means Y_for_regression should be r[1:] (r_2 to r_T) and
+    # X_for_regression should be x[:-1] (x_1 to x_{T-1}).
+    Y_for_regression = Y_full[1:]  # r_{t+1} values (from period 2 to T)
+    X_for_regression = X_full[:-1] # x_i,t values (from period 1 to T-1)
+
+    # Add constant term
+    X_with_const = sm.add_constant(X_for_regression)
 
     # OLS regression with HAC standard errors
-    model = sm.OLS(Y, X).fit(cov_type='HAC', cov_kwds={'maxlags': 4})
+    # Now regressing r_{t+1} on const and x_i,t
+    model = sm.OLS(Y_for_regression, X_with_const).fit(cov_type='HAC', cov_kwds={'maxlags': 4})
 
-    # Extract results
+    # Extract results (index 0 is const, index 1 is slope beta)
     alpha = model.params[0]
     beta = model.params[1]
     t_stat = model.tvalues[1]
@@ -113,11 +124,11 @@ for var in predictor_vars:
     }
 
     in_sample_results.append(result)
-    results_dict[var] = model
+    results_dict[var] = model # Store the correctly fitted model if needed later
 
 in_sample_df = pd.DataFrame(in_sample_results)
 
-print("In-sample regression results:")
+print("In-sample regression results (Corrected: rt+1 on xi,t):")
 print(in_sample_df[['Variable', 'Beta', 'T-stat', 'P-value (one-sided)', 'Adj R²']].to_string(index=False))
 
 
@@ -138,7 +149,7 @@ q = total_obs - m - p
 print(f"Sample split: m={m}, p={p}, q={q}, total={total_obs}")
 
 # Generate out-of-sample forecasts for each predictor (including holdout period)
-Y_full = data['r'].values
+Y_full = data['r'].values # Re-assign Y_full here if it was modified earlier
 forecasts_dict = {}
 # Store forecasts for holdout period (m+1 to m+p) and out-of-sample period (m+p+1 to T)
 holdout_forecasts_dict = {} # To store forecasts for periods m+1 to m+p (used for DMSPE weights)
@@ -149,59 +160,70 @@ for var in predictor_vars:
     holdout_individual_forecasts = []
     oos_individual_forecasts = []
 
-    # Generate forecasts for holdout period (m+1 to m+p, i.e., index m to m+p-1)
-    for t in range(m, m + p):
-        Y_train = Y_full[1:t] # Data up to t-1
-        X_train = X_full[:t-1] # Predictor lagged by 1, so up to t-1
-        X_train = sm.add_constant(X_train)
-
-        if len(Y_train) == len(X_train[:, 1]): # Ensure lengths match
-            model = sm.OLS(Y_train, X_train).fit()
-            X_forecast = np.array([1, X_full[t-1]]) # Predictor at time t-1 predicts r_t
+    # Generate forecasts for holdout period (m+1 to m+p, i.e., forecast r_{m+1} to r_{m+p})
+    # Use data up to t-1 to forecast r_t (where t ranges from m+1 to m+p)
+    # So, regress r_2 to r_{m+p} on const and x_1 to x_{m+p-1}
+    for t in range(m + 1, m + p + 1): # t from m+1 to m+p (forecast r_{m+1} to r_{m+p})
+        Y_train = Y_full[1:t] # Data r_2 to r_t (predictors start from r_2)
+        X_train = X_full[:t-1] # Predictor x_1 to x_{t-1} (predicts r_2 to r_t)
+        if len(Y_train) == len(X_train): # Ensure lengths match
+            X_train_with_const = sm.add_constant(X_train)
+            model = sm.OLS(Y_train, X_train_with_const).fit()
+            # Forecast r_{t} using x_{t-1} (X_full[t-1] is x_{t-1})
+            X_forecast = np.array([1, X_full[t-1]]) # Predictor x_{t-1} predicts r_t
             forecast = model.predict(X_forecast)[0]
             holdout_individual_forecasts.append(forecast)
         else:
-            print(f"Length mismatch for {var} at t={t}: Y_train={len(Y_train)}, X_train={len(X_train[:, 1])}")
-            # Handle potential mismatch, maybe append NaN or skip, but need consistent indexing
-            # For now, append a placeholder if lengths don't match, though this indicates an issue
-            holdout_individual_forecasts.append(np.nan) 
+            print(f"Length mismatch for {var} at t={t}: Y_train={len(Y_train)}, X_train={len(X_train)}")
+            holdout_individual_forecasts.append(np.nan)
 
-    # Generate forecasts for out-of-sample period (m+p+1 to T, i.e., index m+p to T-1)
-    for t in range(m + p, total_obs - 1): # Forecast for t+1, so loop until T-2 (index T-1)
-        Y_train = Y_full[1:t+1] # Data up to t
-        X_train = X_full[:t] # Predictor up to t-1 (lags by 1)
-        X_train = sm.add_constant(X_train)
-
-        if len(Y_train) == len(X_train[:, 1]): # Ensure lengths match
-            model = sm.OLS(Y_train, X_train).fit()
-            X_forecast = np.array([1, X_full[t]]) # Predictor at time t predicts r_t+1
+    # Generate forecasts for out-of-sample period (m+p+1 to T, i.e., forecast r_{m+p+1} to r_T)
+    # Use data up to t-1 to forecast r_t (where t ranges from m+p+1 to T)
+    for t in range(m + p + 1, total_obs): # t from m+p+1 to T (forecast r_{m+p+1} to r_T)
+        Y_train = Y_full[1:t] # Data r_2 to r_t (predictors start from r_2)
+        X_train = X_full[:t-1] # Predictor x_1 to x_{t-1} (predicts r_2 to r_t)
+        if len(Y_train) == len(X_train): # Ensure lengths match
+            X_train_with_const = sm.add_constant(X_train)
+            model = sm.OLS(Y_train, X_train_with_const).fit()
+            # Forecast r_{t} using x_{t-1} (X_full[t-1] is x_{t-1})
+            X_forecast = np.array([1, X_full[t-1]]) # Predictor x_{t-1} predicts r_t
             forecast = model.predict(X_forecast)[0]
             oos_individual_forecasts.append(forecast)
         else:
-            print(f"Length mismatch for {var} at t={t}: Y_train={len(Y_train)}, X_train={len(X_train[:, 1])}")
+            print(f"Length mismatch for {var} at t={t}: Y_train={len(Y_train)}, X_train={len(X_train)}")
             oos_individual_forecasts.append(np.nan)
 
     holdout_forecasts_dict[var] = holdout_individual_forecasts
     oos_forecasts_dict[var] = oos_individual_forecasts
 
-# Historical average benchmark for Out-of-Sample Period
+# Historical average benchmark for Out-of-Sample Period (m+p+1 to T)
 benchmark_forecasts_oos = []
-for t in range(m + p, total_obs - 1): # t from m+p to T-2, forecast for t+1 (m+p+1 to T-1)
-    hist_avg = np.mean(Y_full[1:t+1]) # Average from start to time t
+for t in range(m + p + 1, total_obs): # t from m+p+1 to T, forecast for r_t (using data up to t-1)
+    # Average from start to time t-1 (r_1 to r_{t-1})
+    hist_avg = np.mean(Y_full[0:t]) # Average from r_1 to r_{t-1}
+    if t == 1: # Handle first case where t=1, mean of [] is undefined, use r_1 if forecasting r_2 with no data makes sense
+        # The first forecast in OOS period is for t = m+p+1, which is likely > 1.
+        # The benchmark r_bar_{t} = (1/(t-1)) * sum(r_j, j=1 to t-1)
+        # If t = m+p+1, the benchmark uses r_1 to r_{m+p}, which requires t-1 >= 1, so t >= 2.
+        # Our loop starts at t = m+p+1 = 121, so t >= 2 is satisfied.
+        # The benchmark r_bar_{t} is the forecast for r_t, based on data up to t-1.
+        hist_avg = np.mean(Y_full[0:t]) # This handles t=2 correctly (mean of r_1)
     benchmark_forecasts_oos.append(hist_avg)
 
-# Actual returns for Out-of-Sample Period
-actual_returns_oos = Y_full[m + p + 1:total_obs] # r from m+p+1 to T
+# Actual returns for Out-of-Sample Period (m+p+1 to T)
+actual_returns_oos = Y_full[m + p + 1:total_obs] # r from r_{m+p+1} to r_T (indices m+p+1 to T-1)
 mspe_benchmark_oos = np.mean((actual_returns_oos - benchmark_forecasts_oos)**2)
 
 # Calculate out-of-sample R² (for Part 2)
 oos_r2_results = []
 for var in predictor_vars:
     forecasts = oos_forecasts_dict[var] # Use OOS forecasts
-    # Check for NaNs and handle if necessary
-    if np.isnan(forecasts).any():
+    # Check for NaNs and handle if necessary - ideally, there should be none with corrected loop
+    forecasts_array = np.array(forecasts)
+    if np.isnan(forecasts_array).any():
          print(f"Warning: NaN found in OOS forecasts for {var}")
-    mspe_model = np.mean((actual_returns_oos - np.array(forecasts))**2)
+    # Assuming no NaNs based on corrected logic, calculate MSPE
+    mspe_model = np.mean((actual_returns_oos - forecasts_array)**2)
     oos_r2 = 1 - (mspe_model / mspe_benchmark_oos)
 
     result = {
@@ -227,21 +249,30 @@ print("PART 3: KITCHEN SINK REGRESSION")
 print("="*60)
 
 kitchen_sink_forecasts = []
-for t in range(m + p, total_obs - 1): # Forecast for t+1, loop until T-2
-    Y_train = Y_full[1:t+1] # Use data up to t
-    X_train = data[predictor_vars].iloc[:t].values # Use predictor data up to t-1
-    X_train = sm.add_constant(X_train)
+for t in range(m + p + 1, total_obs): # t from m+p+1 to T (forecast r_t using data up to t-1)
+    Y_train = Y_full[1:t] # Use data r_2 to r_t (predictors start from r_2)
+    X_train = data[predictor_vars].iloc[:t-1].values # Use predictor data x_1 to x_{t-1}
+    if len(Y_train) == X_train.shape[0]: # Ensure lengths match
+        X_train_with_const = sm.add_constant(X_train)
+        model = sm.OLS(Y_train, X_train_with_const).fit()
+        # Forecast r_t using x_{t-1} (data[predictor_vars].iloc[t-1].values)
+        X_forecast = np.concatenate([[1], data[predictor_vars].iloc[t-1].values]) # Use predictor data x_{t-1}
+        forecast = model.predict(X_forecast)[0]
+        kitchen_sink_forecasts.append(forecast)
+    else:
+        print(f"Length mismatch in Kitchen Sink at t={t}: Y_train={len(Y_train)}, X_train={X_train.shape[0]}")
+        kitchen_sink_forecasts.append(np.nan)
 
-    model = sm.OLS(Y_train, X_train).fit()
-    X_forecast = np.concatenate([[1], data[predictor_vars].iloc[t].values]) # Use predictor data at t
-    forecast = model.predict(X_forecast)[0]
-    kitchen_sink_forecasts.append(forecast)
-
-mspe_kitchen_sink = np.mean((actual_returns_oos - kitchen_sink_forecasts)**2) # Use OOS actuals
-oos_r2_kitchen_sink = 1 - (mspe_kitchen_sink / mspe_benchmark_oos) # Use OOS benchmark MSPE
-
-print(f"Kitchen Sink OOS R²: {oos_r2_kitchen_sink:.4f}")
-print(f"Outperforms benchmark: {oos_r2_kitchen_sink > 0}")
+# Remove potential NaNs before calculating MSPE if any occurred (they shouldn't with corrected loop)
+kitchen_sink_forecasts_clean = [f for f in kitchen_sink_forecasts if not np.isnan(f)]
+if len(kitchen_sink_forecasts_clean) == len(actual_returns_oos):
+    mspe_kitchen_sink = np.mean((actual_returns_oos - np.array(kitchen_sink_forecasts_clean))**2)
+    oos_r2_kitchen_sink = 1 - (mspe_kitchen_sink / mspe_benchmark_oos)
+    print(f"Kitchen Sink OOS R²: {oos_r2_kitchen_sink:.4f}")
+    print(f"Outperforms benchmark: {oos_r2_kitchen_sink > 0}")
+else:
+    print("Error: Kitchen Sink forecasts length mismatch with actual returns.")
+    print(f"Expected: {len(actual_returns_oos)}, Got (clean): {len(kitchen_sink_forecasts_clean)}")
 
 
 # =============================================================================
@@ -256,14 +287,8 @@ print("="*60)
 mean_combination_forecasts = []
 for t_idx in range(len(actual_returns_oos)): # Iterate over OOS period length
     individual_forecasts_t = [oos_forecasts_dict[var][t_idx] for var in predictor_vars]
-    # Check for NaNs in individual forecasts
-    individual_forecasts_t = [f for f in individual_forecasts_t if not np.isnan(f)]
-    if len(individual_forecasts_t) == len(predictor_vars): # All forecasts available
-        mean_forecast = np.mean(individual_forecasts_t)
-    else:
-        print(f"Warning: NaN found in individual forecasts at OOS index {t_idx}")
-        # Decide how to handle: skip, use available, etc. For now, assume all present or handle gracefully if not.
-        mean_forecast = np.nanmean(individual_forecasts_t) # Use nanmean if some are NaN
+    # Assuming no NaNs from corrected OOS loop
+    mean_forecast = np.mean(individual_forecasts_t)
     mean_combination_forecasts.append(mean_forecast)
 
 mspe_mean_combo = np.mean((actual_returns_oos - np.array(mean_combination_forecasts))**2)
@@ -273,12 +298,8 @@ oos_r2_mean_combo = 1 - (mspe_mean_combo / mspe_benchmark_oos)
 median_combination_forecasts = []
 for t_idx in range(len(actual_returns_oos)): # Iterate over OOS period length
     individual_forecasts_t = [oos_forecasts_dict[var][t_idx] for var in predictor_vars]
-    individual_forecasts_t = [f for f in individual_forecasts_t if not np.isnan(f)]
-    if len(individual_forecasts_t) == len(predictor_vars):
-        median_forecast = np.median(individual_forecasts_t)
-    else:
-        print(f"Warning: NaN found in individual forecasts at OOS index {t_idx}")
-        median_forecast = np.nanmedian(individual_forecasts_t)
+    # Assuming no NaNs from corrected OOS loop
+    median_forecast = np.median(individual_forecasts_t)
     median_combination_forecasts.append(median_forecast)
 
 mspe_median_combo = np.mean((actual_returns_oos - np.array(median_combination_forecasts))**2)
@@ -290,24 +311,21 @@ def calculate_dmspe_weights_fixed(holdout_forecasts_dict, actual_returns_holdout
     Calculate DMSPE weights based on holdout period performance and apply to OOS period.
     """
     n_vars = len(predictor_vars)
-    n_oos = len(actual_returns_oos)
+    n_oos = len(actual_returns_oos) # Number of OOS forecasts
 
     # Calculate phi (cumulative discounted MSPE) for each variable using HOLDOUT data
     phi_values_holdout_end = []
     for var in predictor_vars:
         phi = 0.0
         # Iterate through the holdout period forecasts (index 0 to p-1)
-        for s_idx in range(len(actual_returns_holdout)):
-            actual_ret_holdout = actual_returns_holdout[s_idx]
-            forecast_ret_holdout = holdout_forecasts_dict[var][s_idx]
-            # Use the holdout period index s_idx, where s_idx=0 corresponds to time m+1, etc.
-            # The discount factor should apply relative to the end of the holdout period.
-            # Stock & Watson often calculate phi at the *end* of the estimation/holdout window.
-            # For weights used *after* the holdout (for OOS), phi is calculated using all holdout errors.
-            # phi_i = sum_{s=m+1}^{m+p} theta^{(m+p)-s} * (r_s - r_hat_i,s)^2
-            # phi_i = sum_{k=0}^{p-1} theta^{p-1-k} * (r_{m+1+k} - r_hat_i,m+1+k)^2
-            # Using s_idx = k (0 to p-1), time is m+1+s_idx
-            # phi_i = sum_{s_idx=0}^{p-1} theta^{p-1-s_idx} * (r_{m+1+s_idx} - r_hat_i,m+1+s_idx)^2
+        # The holdout forecasts are for r_{m+1} to r_{m+p}, based on data up to m, m+1, ..., m+p-1
+        # So the actuals are Y_full[m+1 : m+p+1], forecasts are holdout_forecasts_dict[var]
+        for s_idx in range(len(actual_returns_holdout)): # s_idx goes from 0 to p-1
+            # actual_ret_holdout corresponds to r_{m+1+s_idx}
+            # forecast_ret_holdout corresponds to r_hat_{m+1+s_idx}
+            actual_ret_holdout = actual_returns_holdout[s_idx] # r_{m+1+s_idx}
+            forecast_ret_holdout = holdout_forecasts_dict[var][s_idx] # r_hat_{m+1+s_idx}
+            # Discount factor: theta^{(m+p) - (m+1+s_idx)} = theta^{p - 1 - s_idx}
             discount_power = len(actual_returns_holdout) - 1 - s_idx # p - 1 - s_idx
             phi += (theta ** discount_power) * (actual_ret_holdout - forecast_ret_holdout) ** 2
         phi_values_holdout_end.append(phi + 1e-8) # Add small value to avoid division by zero
@@ -329,7 +347,7 @@ def calculate_dmspe_weights_fixed(holdout_forecasts_dict, actual_returns_holdout
 
 
 # Actual returns for Holdout Period (used for calculating DMSPE weights)
-actual_returns_holdout = Y_full[m + 1 : m + p + 1] # r from m+1 to m+p
+actual_returns_holdout = Y_full[m + 1 : m + p + 1] # r from r_{m+1} to r_{m+p} (indices m+1 to m+p)
 
 # DMSPE for θ = 0.9 and θ = 1.0
 dmspe_results = []
@@ -346,6 +364,7 @@ for theta in [0.9, 1.0]:
 
 print(f"Mean combination: OOS R² = {oos_r2_mean_combo:.4f}")
 print(f"Median combination: OOS R² = {oos_r2_median_combo:.4f}")
+
 
 # =============================================================================
 # SUMMARY
