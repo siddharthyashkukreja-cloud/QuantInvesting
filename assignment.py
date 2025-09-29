@@ -159,7 +159,7 @@ for var in predictor_vars:
 # Historical average benchmark for Out-of-Sample Period
 benchmark_forecasts_oos = []
 for t in range(m + p + 1, total_obs):
-    hist_avg = np.mean(Y_full[:t])  # Simplified: average from start to t-1
+    hist_avg = np.mean(Y_full[:t])  
     benchmark_forecasts_oos.append(hist_avg)
 
 # Actual returns for Out-of-Sample Period
