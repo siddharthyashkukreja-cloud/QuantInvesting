@@ -1,4 +1,4 @@
-print("hi")
+
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
@@ -8,22 +8,18 @@ from statsmodels.graphics.tsaplots import plot_pacf
 import matplotlib.pyplot as plt
 warnings.filterwarnings('ignore')
 
-# Fixed URL - use raw GitHub URL instead of blob URL
-# Note: Ensure there are no trailing spaces in the URL
+#Linked to public Github Repo so should work for any user with no changes to working directory
 BASE_URL = "https://raw.githubusercontent.com/siddharthyashkukreja-cloud/QuantInvesting/35528ac1dde5d2d873e1adfd0864381326d3b768/"
 
 # Load the data
 df = pd.read_csv(f"{BASE_URL}/predictor_data.csv")
 
-print("Data loaded successfully!")
-print(f"Data shape: {df.shape}")
 print("Columns:", df.columns.tolist())
+print("Header:", df.head())
 
-# =============================================================================
-# DATA PREPARATION
-# =============================================================================
+### Data Processing
 
-# Map column names to assignment variable names
+# Column names changed to assignment names
 predictor_mapping = {
     'logDP': 'D/P',
     'logDY': 'D/Y', 
@@ -41,74 +37,47 @@ predictor_mapping = {
     'lagINFL': 'INFL'
 }
 
-# Create working dataset
+# Working dataset
 data = df.copy()
 
-# Apply negative transformation for specified variables (as per assignment)
-# Note: Assignment mentions NTIOS, but likely means NTIS based on list and common usage
+# Negatives for mentioned varaibles
 variables_to_negate = ['ntis', 'tbl', 'lty', 'lagINFL']
 for var in variables_to_negate:
     data[var] = -data[var]
 
-print("Applied negative transformation to:", variables_to_negate)
-
 predictor_vars = list(predictor_mapping.keys())
 dependent_var = 'r'
 
-# =============================================================================
-# PART 0: PACF TEST TO DECIDE LAG (Optional Visualization)
-# =============================================================================
+### PACF test for Lag Selection
 
-print("\n" + "="*60)
-print("PART 0: PACF TEST TO DECIDE LAG")
-print("="*60)
-
-lags = 20  # Number of lags to consider
-plt.figure(figsize=(10, 6))
+lags = 20  
 plot_pacf(data['r'], lags=lags, method='ywm', alpha=0.05)
 plt.title("Partial Autocorrelation Function (PACF) for 'r'")
 plt.xlabel("Lags")
 plt.ylabel("PACF")
 plt.grid()
 plt.show()
-print("PACF plot displayed. Use this to decide the appropriate lag if needed for other analyses.")
 
-# =============================================================================
-# PART 1: IN-SAMPLE ESTIMATION (CORRECTED: rt+1 on xi,t)
-# =============================================================================
+#Lag Selection rule of Thumb Formula = 0.75 × T^(1/3) = 0.75 × 385^(1/3)⌉ = 6
 
-print("\n" + "="*60)
-print("PART 1: IN-SAMPLE ESTIMATION (CORRECTED: rt+1 on xi,t)")
-print("="*60)
+### Regressions for Task 1
 
-Y_full = data['r'].values # Store full series for later use
+Y_full = data['r'].values 
 results_dict = {}
 in_sample_results = []
 
 for var in predictor_vars:
-    X_full = data[var].values # Store full predictor series
-
-    # --- CORRECT ALIGNMENT FOR REGRESSION ---
-    # To regress r_{t+1} on xi,t, align Y[t+1] with X[t].
-    # This means Y_for_regression should be r[1:] (r_2 to r_T) and
-    # X_for_regression should be x[:-1] (x_1 to x_{T-1}).
-    Y_for_regression = Y_full[1:]  # r_{t+1} values (from period 2 to T)
-    X_for_regression = X_full[:-1] # x_i,t values (from period 1 to T-1)
-
-    # Add constant term
+    X_full = data[var].values 
+    Y_for_regression = Y_full[1:] 
+    X_for_regression = X_full[:-1]
     X_with_const = sm.add_constant(X_for_regression)
+    model = sm.OLS(Y_for_regression, X_with_const).fit(cov_type='HAC', cov_kwds={'maxlags': 6})
 
-    # OLS regression with HAC standard errors
-    # Now regressing r_{t+1} on const and x_i,t
-    model = sm.OLS(Y_for_regression, X_with_const).fit(cov_type='HAC', cov_kwds={'maxlags': 4})
-
-    # Extract results (index 0 is const, index 1 is slope beta)
     alpha = model.params[0]
     beta = model.params[1]
     t_stat = model.tvalues[1]
     p_value = model.pvalues[1]
 
-    # One-sided p-value (H0: β = 0 vs HA: β > 0)
     one_sided_p = p_value / 2 if t_stat > 0 else 1 - (p_value / 2)
 
     adj_r2 = model.rsquared_adj
@@ -125,11 +94,11 @@ for var in predictor_vars:
     }
 
     in_sample_results.append(result)
-    results_dict[var] = model # Store the correctly fitted model if needed later
+    results_dict[var] = model # Storing model for potential future use
 
 in_sample_df = pd.DataFrame(in_sample_results)
 
-print("In-sample regression results (Corrected: rt+1 on xi,t):")
+print("Task 1 Regression Results:")
 print(in_sample_df[['Variable', 'Beta', 'T-stat', 'P-value (one-sided)', 'Adj R²']].to_string(index=False))
 
 
