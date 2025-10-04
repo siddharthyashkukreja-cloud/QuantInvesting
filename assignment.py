@@ -57,7 +57,7 @@ plt.ylabel("PACF")
 plt.grid()
 plt.show()
 
-# Lag Selection rule of Thumb Formula = 0.75 × T^(1/3) = 0.75 × 385^(1/3)⌉ = 6
+# Lag: 4
 
 ### Helper functions for simplified indexing
 
@@ -85,7 +85,7 @@ for var in predictor_vars:
     Y_for_regression, X_for_regression = get_training_data(Y_full, X_full, len(data))
     
     X_with_const = sm.add_constant(X_for_regression)
-    model = sm.OLS(Y_for_regression, X_with_const).fit(cov_type='HAC', cov_kwds={'maxlags': 6})
+    model = sm.OLS(Y_for_regression, X_with_const).fit(cov_type='HAC', cov_kwds={'maxlags': 4})
 
     alpha = model.params[0]
     beta = model.params[1]
